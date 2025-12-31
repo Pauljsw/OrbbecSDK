@@ -44,6 +44,24 @@ else
     exit 1
 fi
 
+# Compile batch alignment tool
+echo ""
+echo "Compiling post_align_batch..."
+g++ post_align_batch.cpp -o post_align_batch \
+    -I./include \
+    -L./lib/linux_x64 \
+    $(pkg-config --cflags --libs $OPENCV_PKG) \
+    -lOrbbecSDK \
+    -std=c++11 \
+    -Wno-deprecated
+
+if [ $? -eq 0 ]; then
+    echo "✅ post_align_batch compiled successfully!"
+else
+    echo "❌ Compilation failed!"
+    exit 1
+fi
+
 echo ""
 echo "========================================="
 echo "✅ Build Complete!"
