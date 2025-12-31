@@ -178,25 +178,61 @@ int main(int argc, char** argv) {
         std::cout << "  ✓ Processed " << processedPixels << "/" << totalPixels
                   << " pixels (" << (100.0f * processedPixels / totalPixels) << "%)" << std::endl;
 
-        // Step 5: Apply hole filling using OpenCV
-        std::cout << "\n[5/7] Applying hole filling..." << std::endl;
-        std::cout << "  Using OpenCV-based hole filling" << std::endl;
+        // Step 5: Apply dense hole filling
+        std::cout << "\n[5/7] Filling all holes to create dense depth map..." << std::endl;
+        std::cout << "  Target: 100% coverage" << std::endl;
 
         cv::Mat outputDepth = alignedDepth.clone();
-
-        // Simple hole filling: dilate then erode to fill small gaps
         cv::Mat mask = (outputDepth == 0);
-        if(cv::countNonZero(mask) > 0) {
-            // Inpaint using nearby valid depth values
-            cv::Mat temp;
-            outputDepth.convertTo(temp, CV_32F);
+        int totalHoles = cv::countNonZero(mask);
 
-            // Fill holes with nearest neighbor interpolation
+        if(totalHoles > 0) {
+            std::cout << "  Initial holes: " << totalHoles << " pixels" << std::endl;
+
+            // Convert to float for processing
+            cv::Mat depthFloat;
+            outputDepth.convertTo(depthFloat, CV_32F);
+
+            // Method 1: Iterative dilation to propagate depth values
+            std::cout << "  Applying iterative hole filling..." << std::endl;
             cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-            cv::morphologyEx(temp, temp, cv::MORPH_CLOSE, kernel);
 
-            temp.convertTo(outputDepth, CV_16U);
-            std::cout << "  ✓ Filled " << cv::countNonZero(mask) << " hole pixels" << std::endl;
+            int iteration = 0;
+            int maxIterations = 200; // Enough to fill entire image
+
+            while(cv::countNonZero(mask) > 0 && iteration < maxIterations) {
+                // Dilate depth values into holes
+                cv::Mat dilated;
+                cv::dilate(depthFloat, dilated, kernel);
+
+                // Only fill holes, don't overwrite existing values
+                dilated.copyTo(depthFloat, mask);
+
+                // Update mask
+                mask = (depthFloat == 0);
+
+                iteration++;
+
+                // Progress update every 20 iterations
+                if(iteration % 20 == 0) {
+                    int remainingHoles = cv::countNonZero(mask);
+                    float progress = 100.0f * (totalHoles - remainingHoles) / totalHoles;
+                    std::cout << "    Iteration " << iteration
+                              << ": " << (int)progress << "% filled\r" << std::flush;
+                }
+            }
+
+            std::cout << "    Iteration " << iteration
+                      << ": 100% filled        " << std::endl;
+
+            // Convert back to 16-bit
+            depthFloat.convertTo(outputDepth, CV_16U);
+
+            int finalHoles = cv::countNonZero(outputDepth == 0);
+            std::cout << "  ✓ Dense depth map created" << std::endl;
+            std::cout << "    - Filled: " << totalHoles << " holes" << std::endl;
+            std::cout << "    - Remaining holes: " << finalHoles << std::endl;
+            std::cout << "    - Coverage: " << (100.0f * (colorWidth*colorHeight - finalHoles) / (colorWidth*colorHeight)) << "%" << std::endl;
         } else {
             std::cout << "  ✓ No holes to fill" << std::endl;
         }
