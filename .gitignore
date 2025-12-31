@@ -8,3 +8,4 @@ packages
 .vscode
 .idea
 cmake-build-debug/
+convert_calibration
