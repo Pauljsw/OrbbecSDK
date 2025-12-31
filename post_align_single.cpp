@@ -248,8 +248,8 @@ int main(int argc, char** argv) {
         cv::addWeighted(rgbResized, 0.6, depthViz, 0.4, 0, overlay);
 
         // Mask out zero depth regions
-        cv::Mat mask = outputDepth > 0;
-        overlay.setTo(cv::Scalar(0, 0, 0), ~mask);
+        cv::Mat validMask = outputDepth > 0;
+        overlay.setTo(cv::Scalar(0, 0, 0), ~validMask);
 
         cv::imwrite(overlayFile, overlay);
         std::cout << "  ✓ Overlay saved: " << overlayFile << std::endl;

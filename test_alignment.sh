@@ -4,8 +4,12 @@ echo "========================================="
 echo "Test Post-Processing Alignment"
 echo "========================================="
 
+# Get script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
 # Set library path
-export LD_LIBRARY_PATH=/home/user/OrbbecSDK/lib/linux_x64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH="$SCRIPT_DIR/lib/linux_x64:$LD_LIBRARY_PATH"
 
 # Test files (from user's data)
 CALIB_FILE="femto_bolt_CL8855300FR_calibration.bin"

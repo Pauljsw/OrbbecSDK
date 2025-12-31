@@ -4,7 +4,9 @@ echo "========================================="
 echo "Building Post-Alignment Tool"
 echo "========================================="
 
-cd /home/user/OrbbecSDK
+# Get script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
 # Check if OpenCV is installed
 if ! pkg-config --exists opencv4; then
