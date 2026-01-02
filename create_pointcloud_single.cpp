@@ -78,8 +78,10 @@ int main(int argc, char** argv) {
     calibStream.read(reinterpret_cast<char*>(&calibParam), sizeof(OBCalibrationParam));
     calibStream.close();
 
-    std::cout << "  RGB: " << calibParam.rgbIntrinsic.width << "x" << calibParam.rgbIntrinsic.height << std::endl;
-    std::cout << "  Depth: " << calibParam.depthIntrinsic.width << "x" << calibParam.depthIntrinsic.height << std::endl;
+    std::cout << "  RGB: " << calibParam.intrinsics[OB_SENSOR_COLOR].width << "x"
+              << calibParam.intrinsics[OB_SENSOR_COLOR].height << std::endl;
+    std::cout << "  Depth: " << calibParam.intrinsics[OB_SENSOR_DEPTH].width << "x"
+              << calibParam.intrinsics[OB_SENSOR_DEPTH].height << std::endl;
     std::cout << "✓ Calibration loaded\n" << std::endl;
 
     // Step 2: Load RGB image

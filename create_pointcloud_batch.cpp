@@ -170,8 +170,8 @@ int main(int argc, char** argv) {
     calibStream.read(reinterpret_cast<char*>(&calibParam), sizeof(OBCalibrationParam));
     calibStream.close();
 
-    uint32_t width = calibParam.rgbIntrinsic.width;
-    uint32_t height = calibParam.rgbIntrinsic.height;
+    uint32_t width = calibParam.intrinsics[OB_SENSOR_COLOR].width;
+    uint32_t height = calibParam.intrinsics[OB_SENSOR_COLOR].height;
 
     std::cout << "  RGB resolution: " << width << "x" << height << std::endl;
     std::cout << "✓ Calibration loaded\n" << std::endl;
