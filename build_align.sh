@@ -88,6 +88,7 @@ g++ create_pointcloud_batch.cpp -o create_pointcloud_batch \
     -L./lib/linux_x64 \
     $(pkg-config --cflags --libs $OPENCV_PKG) \
     -lOrbbecSDK \
+    -lstdc++fs \
     -std=c++17 \
     -Wno-deprecated
 

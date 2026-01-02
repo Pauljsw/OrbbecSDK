@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sys/stat.h>
+#include <filesystem>
 
 struct ImagePair {
     std::string rgbPath;
