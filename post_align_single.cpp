@@ -369,14 +369,28 @@ int main(int argc, char** argv) {
         // Step 7: Prepare output
         std::cout << "\n[7/8] Preparing output..." << std::endl;
 
-        // Step 8: Save result
-        std::cout << "\n[8/8] Saving aligned depth image..." << std::endl;
-        std::cout << "  Output: " << outputFile << std::endl;
+        // Step 8: Save results
+        std::cout << "\n[8/8] Saving results..." << std::endl;
 
+        // Save aligned depth as PNG (mm, uint16)
+        std::cout << "  Saving aligned depth PNG (mm): " << outputFile << std::endl;
         bool saved = cv::imwrite(outputFile, outputDepth);
         if(!saved) {
             std::cerr << "❌ ERROR: Failed to save output image" << std::endl;
             return 1;
+        }
+
+        // Save aligned depth as NPY (meters, float32) - for Python compatibility
+        std::string alignedDepthNpyFile = baseOutputPath + ".npy";
+        cv::Mat alignedDepthMeters;
+        outputDepth.convertTo(alignedDepthMeters, CV_32F);
+        alignedDepthMeters = alignedDepthMeters / 1000.0f;  // mm -> meters
+
+        try {
+            saveNPY(alignedDepthNpyFile, alignedDepthMeters);
+            std::cout << "  ✓ Saved aligned depth NPY (meters): " << alignedDepthNpyFile << std::endl;
+        } catch(const std::exception& e) {
+            std::cerr << "  ⚠ Warning: Failed to save aligned depth NPY: " << e.what() << std::endl;
         }
 
         // Calculate statistics
@@ -423,11 +437,12 @@ int main(int argc, char** argv) {
         std::cout << "✅ SUCCESS!" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "\nOutput files:" << std::endl;
-        std::cout << "  1. " << outputFile << " (aligned depth, mm)" << std::endl;
-        std::cout << "  2. " << overlayFile << " (visualization)" << std::endl;
-        std::cout << "  3. " << scaleMapXFile << " (mm/px in X direction)" << std::endl;
-        std::cout << "  4. " << scaleMapYFile << " (mm/px in Y direction)" << std::endl;
-        std::cout << "  5. " << scaleMapIsoFile << " (mm/px isotropic)" << std::endl;
+        std::cout << "  1. " << alignedDepthNpyFile << " (aligned depth, meters, float32)" << std::endl;
+        std::cout << "  2. " << outputFile << " (aligned depth, mm, uint16)" << std::endl;
+        std::cout << "  3. " << overlayFile << " (visualization)" << std::endl;
+        std::cout << "  4. " << scaleMapXFile << " (mm/px in X direction)" << std::endl;
+        std::cout << "  5. " << scaleMapYFile << " (mm/px in Y direction)" << std::endl;
+        std::cout << "  6. " << scaleMapIsoFile << " (mm/px isotropic)" << std::endl;
 
         return 0;
 

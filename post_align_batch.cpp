@@ -369,13 +369,24 @@ int main(int argc, char** argv) {
                 cv::Mat scaleMapX, scaleMapY, scaleMapIso;
                 computeScaleMaps(denseDepth, fx, fy, scaleMapX, scaleMapY, scaleMapIso);
 
-                // Save aligned depth PNG
+                // Save aligned depth PNG (mm, uint16)
                 std::string outputFilename = "camera_ALIGNED_" + pair.timestamp + ".png";
                 std::string outputPath = outputDir + "/" + outputFilename;
 
                 if(!cv::imwrite(outputPath, denseDepth)) {
                     failCount++;
                     continue;
+                }
+
+                // Save aligned depth NPY (meters, float32) - for Python compatibility
+                try {
+                    std::string alignedDepthNpyFile = outputDir + "/aligned_depth_" + pair.timestamp + ".npy";
+                    cv::Mat alignedDepthMeters;
+                    denseDepth.convertTo(alignedDepthMeters, CV_32F);
+                    alignedDepthMeters = alignedDepthMeters / 1000.0f;  // mm -> meters
+                    saveNPY(alignedDepthNpyFile, alignedDepthMeters);
+                } catch(const std::exception& e) {
+                    // Continue even if NPY saving fails
                 }
 
                 // Save scale maps as NPY
@@ -417,6 +428,7 @@ int main(int argc, char** argv) {
         std::cout << "\nOutput directory:" << std::endl;
         std::cout << "  " << outputDir << std::endl;
         std::cout << "\nOutput files per image pair:" << std::endl;
+        std::cout << "  - aligned_depth_<timestamp>.npy   (aligned depth, meters, float32)" << std::endl;
         std::cout << "  - camera_ALIGNED_<timestamp>.png  (aligned depth, mm, uint16)" << std::endl;
         std::cout << "  - scale_map_x_<timestamp>.npy     (mm/px in X, float32)" << std::endl;
         std::cout << "  - scale_map_y_<timestamp>.npy     (mm/px in Y, float32)" << std::endl;
