@@ -3,6 +3,7 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <cstring>
@@ -11,13 +12,14 @@
 #include <chrono>
 
 /**
- * Batch RGB-Depth Alignment Tool
+ * Batch RGB-Depth Alignment + Scale Map Generator
  *
  * Processes all RGB-Depth image pairs in a directory
  * - Matches camera_RGB_*.png with camera_DPT_*.png by timestamp
  * - Aligns depth to RGB perspective
  * - Applies dense hole filling
- * - Saves aligned depth images
+ * - Generates per-pixel mm/px scale maps
+ * - Saves aligned depth images and scale maps (NPY format)
  *
  * Usage:
  *   ./post_align_batch \
@@ -26,6 +28,74 @@
  *     --depth-dir /path/to/depth/ \
  *     --output-dir /path/to/output/
  */
+
+/**
+ * Save a float32 2D array as NPY format (NumPy compatible)
+ */
+void saveNPY(const std::string& filename, const cv::Mat& data) {
+    if(data.type() != CV_32F) {
+        throw std::runtime_error("saveNPY: Only CV_32F (float32) supported");
+    }
+
+    std::ofstream ofs(filename, std::ios::binary);
+    if(!ofs.is_open()) {
+        throw std::runtime_error("saveNPY: Cannot open file: " + filename);
+    }
+
+    // NPY format header
+    ofs.write("\x93NUMPY", 6);
+    ofs.put(0x01);
+    ofs.put(0x00);
+
+    std::ostringstream header;
+    header << "{'descr': '<f4', 'fortran_order': False, 'shape': ("
+           << data.rows << ", " << data.cols << "), }";
+
+    std::string header_str = header.str();
+    while((header_str.size() + 10) % 64 != 0) {
+        header_str += ' ';
+    }
+    header_str += '\n';
+
+    uint16_t header_len = header_str.size();
+    ofs.write(reinterpret_cast<const char*>(&header_len), 2);
+    ofs.write(header_str.c_str(), header_len);
+    ofs.write(reinterpret_cast<const char*>(data.data),
+              data.rows * data.cols * sizeof(float));
+
+    ofs.close();
+}
+
+/**
+ * Compute per-pixel mm/px scale maps from aligned depth and camera intrinsics
+ */
+void computeScaleMaps(const cv::Mat& alignedDepthMM,
+                      float fx, float fy,
+                      cv::Mat& scaleMapX,
+                      cv::Mat& scaleMapY,
+                      cv::Mat& scaleMapIso) {
+
+    scaleMapX = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+    scaleMapY = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+    scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+
+    for(int y = 0; y < alignedDepthMM.rows; y++) {
+        for(int x = 0; x < alignedDepthMM.cols; x++) {
+            uint16_t depthMM = alignedDepthMM.at<uint16_t>(y, x);
+
+            if(depthMM > 0) {
+                float depthM = depthMM / 1000.0f;
+                float mmPerPxX = (depthM / fx) * 1000.0f;
+                float mmPerPxY = (depthM / fy) * 1000.0f;
+                float mmPerPxIso = 0.5f * (mmPerPxX + mmPerPxY);
+
+                scaleMapX.at<float>(y, x) = mmPerPxX;
+                scaleMapY.at<float>(y, x) = mmPerPxY;
+                scaleMapIso.at<float>(y, x) = mmPerPxIso;
+            }
+        }
+    }
+}
 
 struct ImagePair {
     std::string rgbPath;
@@ -197,9 +267,12 @@ int main(int argc, char** argv) {
 
         int colorWidth = calibParam.intrinsics[OB_SENSOR_COLOR].width;
         int colorHeight = calibParam.intrinsics[OB_SENSOR_COLOR].height;
+        float fx = calibParam.intrinsics[OB_SENSOR_COLOR].fx;
+        float fy = calibParam.intrinsics[OB_SENSOR_COLOR].fy;
 
         std::cout << "  ✓ Calibration loaded" << std::endl;
         std::cout << "    Target resolution: " << colorWidth << "x" << colorHeight << std::endl;
+        std::cout << "    RGB intrinsics: fx=" << fx << ", fy=" << fy << std::endl;
 
         // Step 2: Create output directory
         std::cout << "\n[2/6] Creating output directory..." << std::endl;
@@ -292,13 +365,30 @@ int main(int argc, char** argv) {
                 // Apply dense hole filling
                 cv::Mat denseDepth = applyDenseHoleFilling(alignedDepth, 200);
 
-                // Save result
+                // Compute scale maps
+                cv::Mat scaleMapX, scaleMapY, scaleMapIso;
+                computeScaleMaps(denseDepth, fx, fy, scaleMapX, scaleMapY, scaleMapIso);
+
+                // Save aligned depth PNG
                 std::string outputFilename = "camera_ALIGNED_" + pair.timestamp + ".png";
                 std::string outputPath = outputDir + "/" + outputFilename;
 
                 if(!cv::imwrite(outputPath, denseDepth)) {
                     failCount++;
                     continue;
+                }
+
+                // Save scale maps as NPY
+                try {
+                    std::string scaleMapXFile = outputDir + "/scale_map_x_" + pair.timestamp + ".npy";
+                    std::string scaleMapYFile = outputDir + "/scale_map_y_" + pair.timestamp + ".npy";
+                    std::string scaleMapIsoFile = outputDir + "/scale_map_iso_" + pair.timestamp + ".npy";
+
+                    saveNPY(scaleMapXFile, scaleMapX);
+                    saveNPY(scaleMapYFile, scaleMapY);
+                    saveNPY(scaleMapIsoFile, scaleMapIso);
+                } catch(const std::exception& e) {
+                    // Continue even if scale map saving fails
                 }
 
                 successCount++;
@@ -326,8 +416,11 @@ int main(int argc, char** argv) {
         std::cout << "  ✗ Failed: " << failCount << std::endl;
         std::cout << "\nOutput directory:" << std::endl;
         std::cout << "  " << outputDir << std::endl;
-        std::cout << "\nOutput files:" << std::endl;
-        std::cout << "  camera_ALIGNED_<timestamp>.png (3840x2160, dense depth)" << std::endl;
+        std::cout << "\nOutput files per image pair:" << std::endl;
+        std::cout << "  - camera_ALIGNED_<timestamp>.png  (aligned depth, mm, uint16)" << std::endl;
+        std::cout << "  - scale_map_x_<timestamp>.npy     (mm/px in X, float32)" << std::endl;
+        std::cout << "  - scale_map_y_<timestamp>.npy     (mm/px in Y, float32)" << std::endl;
+        std::cout << "  - scale_map_iso_<timestamp>.npy   (mm/px isotropic, float32)" << std::endl;
 
         return (failCount == 0) ? 0 : 1;
 

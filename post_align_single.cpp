@@ -4,13 +4,16 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <cstring>
 
 /**
- * Post-processing RGB-Depth Alignment Tool
+ * Post-processing RGB-Depth Alignment + Scale Map Generator
  *
  * Aligns already-captured depth images to color camera perspective
- * Uses OrbbecSDK's calibration2dTo2d and HoleFillingFilter
+ * and generates per-pixel mm/px scale maps
+ *
+ * Uses OrbbecSDK's calibration2dTo2d and dense hole filling
  *
  * Usage:
  *   ./post_align_single \
@@ -19,6 +22,88 @@
  *     --rgb /path/to/rgb.png \
  *     --output /path/to/aligned_depth.png
  */
+
+/**
+ * Save a float32 2D array as NPY format (NumPy compatible)
+ */
+void saveNPY(const std::string& filename, const cv::Mat& data) {
+    if(data.type() != CV_32F) {
+        throw std::runtime_error("saveNPY: Only CV_32F (float32) supported");
+    }
+
+    std::ofstream ofs(filename, std::ios::binary);
+    if(!ofs.is_open()) {
+        throw std::runtime_error("saveNPY: Cannot open file: " + filename);
+    }
+
+    // NPY format header
+    // Magic number
+    ofs.write("\x93NUMPY", 6);
+
+    // Version 1.0
+    ofs.put(0x01);
+    ofs.put(0x00);
+
+    // Create header dict
+    std::ostringstream header;
+    header << "{'descr': '<f4', 'fortran_order': False, 'shape': ("
+           << data.rows << ", " << data.cols << "), }";
+
+    std::string header_str = header.str();
+
+    // Pad header to align to 64-byte boundary
+    // Total header size = 6 (magic) + 2 (version) + 2 (header_len) + header_str + padding
+    while((header_str.size() + 10) % 64 != 0) {
+        header_str += ' ';
+    }
+    header_str += '\n';
+
+    // Write header length (little-endian uint16)
+    uint16_t header_len = header_str.size();
+    ofs.write(reinterpret_cast<const char*>(&header_len), 2);
+
+    // Write header string
+    ofs.write(header_str.c_str(), header_len);
+
+    // Write data (row-major, C-order)
+    ofs.write(reinterpret_cast<const char*>(data.data),
+              data.rows * data.cols * sizeof(float));
+
+    ofs.close();
+}
+
+/**
+ * Compute per-pixel mm/px scale maps from aligned depth and camera intrinsics
+ */
+void computeScaleMaps(const cv::Mat& alignedDepthMM,
+                      float fx, float fy,
+                      cv::Mat& scaleMapX,
+                      cv::Mat& scaleMapY,
+                      cv::Mat& scaleMapIso) {
+
+    scaleMapX = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+    scaleMapY = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+    scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+
+    for(int y = 0; y < alignedDepthMM.rows; y++) {
+        for(int x = 0; x < alignedDepthMM.cols; x++) {
+            uint16_t depthMM = alignedDepthMM.at<uint16_t>(y, x);
+
+            if(depthMM > 0) {
+                float depthM = depthMM / 1000.0f;  // mm to meters
+
+                // mm/px = (depth_m / focal_length) * 1000.0
+                float mmPerPxX = (depthM / fx) * 1000.0f;
+                float mmPerPxY = (depthM / fy) * 1000.0f;
+                float mmPerPxIso = 0.5f * (mmPerPxX + mmPerPxY);
+
+                scaleMapX.at<float>(y, x) = mmPerPxX;
+                scaleMapY.at<float>(y, x) = mmPerPxY;
+                scaleMapIso.at<float>(y, x) = mmPerPxIso;
+            }
+        }
+    }
+}
 
 void printUsage(const char* programName) {
     std::cout << "\nUsage:" << std::endl;
@@ -72,7 +157,7 @@ int main(int argc, char** argv) {
 
     try {
         // Step 1: Load calibration parameters
-        std::cout << "[1/7] Loading calibration parameters..." << std::endl;
+        std::cout << "[1/8] Loading calibration parameters..." << std::endl;
         std::cout << "  File: " << calibFile << std::endl;
 
         std::ifstream calibStream(calibFile, std::ios::binary);
@@ -91,7 +176,7 @@ int main(int argc, char** argv) {
                   << "x" << calibParam.intrinsics[OB_SENSOR_COLOR].height << std::endl;
 
         // Step 2: Load images
-        std::cout << "\n[2/7] Loading images..." << std::endl;
+        std::cout << "\n[2/8] Loading images..." << std::endl;
         std::cout << "  Depth: " << depthFile << std::endl;
 
         cv::Mat depthImage = cv::imread(depthFile, cv::IMREAD_UNCHANGED);
@@ -120,13 +205,13 @@ int main(int argc, char** argv) {
         int colorWidth = calibParam.intrinsics[OB_SENSOR_COLOR].width;
         int colorHeight = calibParam.intrinsics[OB_SENSOR_COLOR].height;
 
-        std::cout << "\n[3/7] Creating aligned depth image..." << std::endl;
+        std::cout << "\n[3/8] Creating aligned depth image..." << std::endl;
         std::cout << "  Target size: " << colorWidth << "x" << colorHeight << std::endl;
 
         cv::Mat alignedDepth = cv::Mat::zeros(colorHeight, colorWidth, CV_16U);
 
         // Step 4: Perform alignment using SDK's calibration2dTo2d
-        std::cout << "\n[4/7] Aligning depth to color camera perspective..." << std::endl;
+        std::cout << "\n[4/8] Aligning depth to color camera perspective..." << std::endl;
         std::cout << "  Using SDK's calibration2dTo2d function" << std::endl;
 
         uint16_t* depthData = (uint16_t*)depthImage.data;
@@ -179,7 +264,7 @@ int main(int argc, char** argv) {
                   << " pixels (" << (100.0f * processedPixels / totalPixels) << "%)" << std::endl;
 
         // Step 5: Apply dense hole filling
-        std::cout << "\n[5/7] Filling all holes to create dense depth map..." << std::endl;
+        std::cout << "\n[5/8] Filling all holes to create dense depth map..." << std::endl;
         std::cout << "  Target: 100% coverage" << std::endl;
 
         cv::Mat outputDepth = alignedDepth.clone();
@@ -237,11 +322,55 @@ int main(int argc, char** argv) {
             std::cout << "  ✓ No holes to fill" << std::endl;
         }
 
-        // Step 6: Prepare output
-        std::cout << "\n[6/7] Preparing output..." << std::endl;
+        // Step 6: Compute per-pixel mm/px scale maps
+        std::cout << "\n[6/8] Computing per-pixel mm/px scale maps..." << std::endl;
 
-        // Step 7: Save result
-        std::cout << "\n[7/7] Saving aligned depth image..." << std::endl;
+        float fx = calibParam.intrinsics[OB_SENSOR_COLOR].fx;
+        float fy = calibParam.intrinsics[OB_SENSOR_COLOR].fy;
+
+        std::cout << "  RGB camera intrinsics:" << std::endl;
+        std::cout << "    fx = " << fx << " pixels" << std::endl;
+        std::cout << "    fy = " << fy << " pixels" << std::endl;
+
+        cv::Mat scaleMapX, scaleMapY, scaleMapIso;
+        computeScaleMaps(outputDepth, fx, fy, scaleMapX, scaleMapY, scaleMapIso);
+
+        std::cout << "  ✓ Scale maps computed" << std::endl;
+
+        // Save scale maps as NPY
+        std::string baseOutputPath = outputFile.substr(0, outputFile.find_last_of('.'));
+        std::string scaleMapXFile = baseOutputPath + "_scale_map_x.npy";
+        std::string scaleMapYFile = baseOutputPath + "_scale_map_y.npy";
+        std::string scaleMapIsoFile = baseOutputPath + "_scale_map_iso.npy";
+
+        try {
+            saveNPY(scaleMapXFile, scaleMapX);
+            saveNPY(scaleMapYFile, scaleMapY);
+            saveNPY(scaleMapIsoFile, scaleMapIso);
+
+            std::cout << "  ✓ Saved scale_map_x.npy" << std::endl;
+            std::cout << "  ✓ Saved scale_map_y.npy" << std::endl;
+            std::cout << "  ✓ Saved scale_map_iso.npy" << std::endl;
+
+            // Calculate statistics
+            cv::Scalar meanX = cv::mean(scaleMapX, scaleMapX > 0);
+            cv::Scalar meanY = cv::mean(scaleMapY, scaleMapY > 0);
+            cv::Scalar meanIso = cv::mean(scaleMapIso, scaleMapIso > 0);
+
+            std::cout << "  Statistics (valid pixels only):" << std::endl;
+            std::cout << "    Mean mm/px (X): " << meanX[0] << " mm" << std::endl;
+            std::cout << "    Mean mm/px (Y): " << meanY[0] << " mm" << std::endl;
+            std::cout << "    Mean mm/px (Iso): " << meanIso[0] << " mm" << std::endl;
+
+        } catch(const std::exception& e) {
+            std::cerr << "  ⚠ Warning: Failed to save scale maps: " << e.what() << std::endl;
+        }
+
+        // Step 7: Prepare output
+        std::cout << "\n[7/8] Preparing output..." << std::endl;
+
+        // Step 8: Save result
+        std::cout << "\n[8/8] Saving aligned depth image..." << std::endl;
         std::cout << "  Output: " << outputFile << std::endl;
 
         bool saved = cv::imwrite(outputFile, outputDepth);
@@ -294,8 +423,11 @@ int main(int argc, char** argv) {
         std::cout << "✅ SUCCESS!" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "\nOutput files:" << std::endl;
-        std::cout << "  1. " << outputFile << " (aligned depth)" << std::endl;
+        std::cout << "  1. " << outputFile << " (aligned depth, mm)" << std::endl;
         std::cout << "  2. " << overlayFile << " (visualization)" << std::endl;
+        std::cout << "  3. " << scaleMapXFile << " (mm/px in X direction)" << std::endl;
+        std::cout << "  4. " << scaleMapYFile << " (mm/px in Y direction)" << std::endl;
+        std::cout << "  5. " << scaleMapIsoFile << " (mm/px isotropic)" << std::endl;
 
         return 0;
 
