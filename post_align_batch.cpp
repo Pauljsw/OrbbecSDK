@@ -67,17 +67,10 @@ void saveNPY(const std::string& filename, const cv::Mat& data) {
 }
 
 /**
- * Compute per-pixel mm/px scale maps from aligned depth and camera intrinsics
+ * Compute per-pixel mm/px scale map (isotropic) from aligned depth and camera intrinsics
  */
-void computeScaleMaps(const cv::Mat& alignedDepthMM,
-                      float fx, float fy,
-                      cv::Mat& scaleMapX,
-                      cv::Mat& scaleMapY,
-                      cv::Mat& scaleMapIso) {
-
-    scaleMapX = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
-    scaleMapY = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
-    scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+cv::Mat computeScaleMapIso(const cv::Mat& alignedDepthMM, float fx, float fy) {
+    cv::Mat scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
 
     for(int y = 0; y < alignedDepthMM.rows; y++) {
         for(int x = 0; x < alignedDepthMM.cols; x++) {
@@ -89,12 +82,12 @@ void computeScaleMaps(const cv::Mat& alignedDepthMM,
                 float mmPerPxY = (depthM / fy) * 1000.0f;
                 float mmPerPxIso = 0.5f * (mmPerPxX + mmPerPxY);
 
-                scaleMapX.at<float>(y, x) = mmPerPxX;
-                scaleMapY.at<float>(y, x) = mmPerPxY;
                 scaleMapIso.at<float>(y, x) = mmPerPxIso;
             }
         }
     }
+
+    return scaleMapIso;
 }
 
 struct ImagePair {
@@ -365,9 +358,8 @@ int main(int argc, char** argv) {
                 // Apply dense hole filling
                 cv::Mat denseDepth = applyDenseHoleFilling(alignedDepth, 200);
 
-                // Compute scale maps
-                cv::Mat scaleMapX, scaleMapY, scaleMapIso;
-                computeScaleMaps(denseDepth, fx, fy, scaleMapX, scaleMapY, scaleMapIso);
+                // Compute scale map (isotropic)
+                cv::Mat scaleMapIso = computeScaleMapIso(denseDepth, fx, fy);
 
                 // Save aligned depth PNG (mm, uint16)
                 std::string outputFilename = "camera_ALIGNED_" + pair.timestamp + ".png";
@@ -389,14 +381,9 @@ int main(int argc, char** argv) {
                     // Continue even if NPY saving fails
                 }
 
-                // Save scale maps as NPY
+                // Save scale map as NPY
                 try {
-                    std::string scaleMapXFile = outputDir + "/scale_map_x_" + pair.timestamp + ".npy";
-                    std::string scaleMapYFile = outputDir + "/scale_map_y_" + pair.timestamp + ".npy";
                     std::string scaleMapIsoFile = outputDir + "/scale_map_iso_" + pair.timestamp + ".npy";
-
-                    saveNPY(scaleMapXFile, scaleMapX);
-                    saveNPY(scaleMapYFile, scaleMapY);
                     saveNPY(scaleMapIsoFile, scaleMapIso);
                 } catch(const std::exception& e) {
                     // Continue even if scale map saving fails
@@ -430,8 +417,6 @@ int main(int argc, char** argv) {
         std::cout << "\nOutput files per image pair:" << std::endl;
         std::cout << "  - aligned_depth_<timestamp>.npy   (aligned depth, meters, float32)" << std::endl;
         std::cout << "  - camera_ALIGNED_<timestamp>.png  (aligned depth, mm, uint16)" << std::endl;
-        std::cout << "  - scale_map_x_<timestamp>.npy     (mm/px in X, float32)" << std::endl;
-        std::cout << "  - scale_map_y_<timestamp>.npy     (mm/px in Y, float32)" << std::endl;
         std::cout << "  - scale_map_iso_<timestamp>.npy   (mm/px isotropic, float32)" << std::endl;
 
         return (failCount == 0) ? 0 : 1;

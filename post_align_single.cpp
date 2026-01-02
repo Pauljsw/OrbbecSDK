@@ -73,17 +73,10 @@ void saveNPY(const std::string& filename, const cv::Mat& data) {
 }
 
 /**
- * Compute per-pixel mm/px scale maps from aligned depth and camera intrinsics
+ * Compute per-pixel mm/px scale map (isotropic) from aligned depth and camera intrinsics
  */
-void computeScaleMaps(const cv::Mat& alignedDepthMM,
-                      float fx, float fy,
-                      cv::Mat& scaleMapX,
-                      cv::Mat& scaleMapY,
-                      cv::Mat& scaleMapIso) {
-
-    scaleMapX = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
-    scaleMapY = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
-    scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
+cv::Mat computeScaleMapIso(const cv::Mat& alignedDepthMM, float fx, float fy) {
+    cv::Mat scaleMapIso = cv::Mat::zeros(alignedDepthMM.size(), CV_32F);
 
     for(int y = 0; y < alignedDepthMM.rows; y++) {
         for(int x = 0; x < alignedDepthMM.cols; x++) {
@@ -97,12 +90,12 @@ void computeScaleMaps(const cv::Mat& alignedDepthMM,
                 float mmPerPxY = (depthM / fy) * 1000.0f;
                 float mmPerPxIso = 0.5f * (mmPerPxX + mmPerPxY);
 
-                scaleMapX.at<float>(y, x) = mmPerPxX;
-                scaleMapY.at<float>(y, x) = mmPerPxY;
                 scaleMapIso.at<float>(y, x) = mmPerPxIso;
             }
         }
     }
+
+    return scaleMapIso;
 }
 
 void printUsage(const char* programName) {
@@ -322,8 +315,8 @@ int main(int argc, char** argv) {
             std::cout << "  ✓ No holes to fill" << std::endl;
         }
 
-        // Step 6: Compute per-pixel mm/px scale maps
-        std::cout << "\n[6/8] Computing per-pixel mm/px scale maps..." << std::endl;
+        // Step 6: Compute per-pixel mm/px scale map (isotropic)
+        std::cout << "\n[6/8] Computing per-pixel mm/px scale map..." << std::endl;
 
         float fx = calibParam.intrinsics[OB_SENSOR_COLOR].fx;
         float fy = calibParam.intrinsics[OB_SENSOR_COLOR].fy;
@@ -332,38 +325,25 @@ int main(int argc, char** argv) {
         std::cout << "    fx = " << fx << " pixels" << std::endl;
         std::cout << "    fy = " << fy << " pixels" << std::endl;
 
-        cv::Mat scaleMapX, scaleMapY, scaleMapIso;
-        computeScaleMaps(outputDepth, fx, fy, scaleMapX, scaleMapY, scaleMapIso);
+        cv::Mat scaleMapIso = computeScaleMapIso(outputDepth, fx, fy);
 
-        std::cout << "  ✓ Scale maps computed" << std::endl;
+        std::cout << "  ✓ Scale map computed" << std::endl;
 
-        // Save scale maps as NPY
+        // Save scale map as NPY
         std::string baseOutputPath = outputFile.substr(0, outputFile.find_last_of('.'));
-        std::string scaleMapXFile = baseOutputPath + "_scale_map_x.npy";
-        std::string scaleMapYFile = baseOutputPath + "_scale_map_y.npy";
         std::string scaleMapIsoFile = baseOutputPath + "_scale_map_iso.npy";
 
         try {
-            saveNPY(scaleMapXFile, scaleMapX);
-            saveNPY(scaleMapYFile, scaleMapY);
             saveNPY(scaleMapIsoFile, scaleMapIso);
-
-            std::cout << "  ✓ Saved scale_map_x.npy" << std::endl;
-            std::cout << "  ✓ Saved scale_map_y.npy" << std::endl;
             std::cout << "  ✓ Saved scale_map_iso.npy" << std::endl;
 
             // Calculate statistics
-            cv::Scalar meanX = cv::mean(scaleMapX, scaleMapX > 0);
-            cv::Scalar meanY = cv::mean(scaleMapY, scaleMapY > 0);
             cv::Scalar meanIso = cv::mean(scaleMapIso, scaleMapIso > 0);
-
             std::cout << "  Statistics (valid pixels only):" << std::endl;
-            std::cout << "    Mean mm/px (X): " << meanX[0] << " mm" << std::endl;
-            std::cout << "    Mean mm/px (Y): " << meanY[0] << " mm" << std::endl;
-            std::cout << "    Mean mm/px (Iso): " << meanIso[0] << " mm" << std::endl;
+            std::cout << "    Mean mm/px: " << meanIso[0] << " mm" << std::endl;
 
         } catch(const std::exception& e) {
-            std::cerr << "  ⚠ Warning: Failed to save scale maps: " << e.what() << std::endl;
+            std::cerr << "  ⚠ Warning: Failed to save scale map: " << e.what() << std::endl;
         }
 
         // Step 7: Prepare output
@@ -440,9 +420,7 @@ int main(int argc, char** argv) {
         std::cout << "  1. " << alignedDepthNpyFile << " (aligned depth, meters, float32)" << std::endl;
         std::cout << "  2. " << outputFile << " (aligned depth, mm, uint16)" << std::endl;
         std::cout << "  3. " << overlayFile << " (visualization)" << std::endl;
-        std::cout << "  4. " << scaleMapXFile << " (mm/px in X direction)" << std::endl;
-        std::cout << "  5. " << scaleMapYFile << " (mm/px in Y direction)" << std::endl;
-        std::cout << "  6. " << scaleMapIsoFile << " (mm/px isotropic)" << std::endl;
+        std::cout << "  4. " << scaleMapIsoFile << " (mm/px isotropic, float32)" << std::endl;
 
         return 0;
 
