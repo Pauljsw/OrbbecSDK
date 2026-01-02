@@ -62,15 +62,50 @@ else
     exit 1
 fi
 
+# Compile single point cloud generation tool
+echo ""
+echo "Compiling create_pointcloud_single..."
+g++ create_pointcloud_single.cpp -o create_pointcloud_single \
+    -I./include \
+    -L./lib/linux_x64 \
+    $(pkg-config --cflags --libs $OPENCV_PKG) \
+    -lOrbbecSDK \
+    -std=c++11 \
+    -Wno-deprecated
+
+if [ $? -eq 0 ]; then
+    echo "✅ create_pointcloud_single compiled successfully!"
+else
+    echo "❌ Compilation failed!"
+    exit 1
+fi
+
+# Compile batch point cloud generation tool
+echo ""
+echo "Compiling create_pointcloud_batch..."
+g++ create_pointcloud_batch.cpp -o create_pointcloud_batch \
+    -I./include \
+    -L./lib/linux_x64 \
+    $(pkg-config --cflags --libs $OPENCV_PKG) \
+    -lOrbbecSDK \
+    -std=c++17 \
+    -Wno-deprecated
+
+if [ $? -eq 0 ]; then
+    echo "✅ create_pointcloud_batch compiled successfully!"
+else
+    echo "❌ Compilation failed!"
+    exit 1
+fi
+
 echo ""
 echo "========================================="
 echo "✅ Build Complete!"
 echo "========================================="
 echo ""
-echo "Usage:"
-echo "  ./post_align_single \\"
-echo "    --calib femto_bolt_CL8855300FR_calibration.bin \\"
-echo "    --depth /path/to/depth.png \\"
-echo "    --rgb /path/to/rgb.png \\"
-echo "    --output aligned_depth.png"
+echo "Available tools:"
+echo "  1. post_align_single     - Align single depth to RGB"
+echo "  2. post_align_batch      - Batch align depth to RGB"
+echo "  3. create_pointcloud_single  - Generate single point cloud"
+echo "  4. create_pointcloud_batch   - Batch generate point clouds"
 echo ""
