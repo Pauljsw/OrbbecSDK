@@ -410,6 +410,71 @@ int main(int argc, char** argv) {
         cv::Mat validMask = outputDepth > 0;
         overlay.setTo(cv::Scalar(0, 0, 0), ~validMask);
 
+        // Add mm/px annotations at sample points for paper figures
+        std::cout << "  Adding mm/px annotations at sample points..." << std::endl;
+
+        // Define sample point positions (9 points in a 3x3 grid)
+        std::vector<cv::Point> samplePoints;
+        int margin = 100;
+        int stepX = (colorWidth - 2*margin) / 2;
+        int stepY = (colorHeight - 2*margin) / 2;
+
+        for(int row = 0; row < 3; row++) {
+            for(int col = 0; col < 3; col++) {
+                int x = margin + col * stepX;
+                int y = margin + row * stepY;
+                samplePoints.push_back(cv::Point(x, y));
+            }
+        }
+
+        // Annotate each valid sample point
+        int annotationCount = 0;
+        for(const auto& pt : samplePoints) {
+            // Skip if out of bounds
+            if(pt.x < 0 || pt.x >= colorWidth || pt.y < 0 || pt.y >= colorHeight)
+                continue;
+
+            uint16_t depthMM = outputDepth.at<uint16_t>(pt.y, pt.x);
+            float scaleMmPx = scaleMapIso.at<float>(pt.y, pt.x);
+
+            // Only annotate points with valid depth
+            if(depthMM > 0 && scaleMmPx > 0) {
+                // Draw marker circle
+                cv::circle(overlay, pt, 8, cv::Scalar(0, 255, 255), 2);  // Yellow circle
+                cv::circle(overlay, pt, 3, cv::Scalar(255, 255, 255), -1); // White center
+
+                // Prepare annotation text
+                std::ostringstream text;
+                text << "Z=" << depthMM << "mm";
+                text << ", S=" << std::fixed << std::setprecision(2) << scaleMmPx << "mm/px";
+
+                // Calculate text position (offset from marker)
+                int textX = pt.x + 15;
+                int textY = pt.y - 10;
+
+                // Adjust text position to avoid edge overflow
+                if(textX + 200 > colorWidth) textX = pt.x - 280;
+                if(textY < 20) textY = pt.y + 25;
+
+                // Draw text background for readability
+                std::string textStr = text.str();
+                int baseline = 0;
+                cv::Size textSize = cv::getTextSize(textStr, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseline);
+                cv::rectangle(overlay,
+                             cv::Point(textX - 3, textY - textSize.height - 3),
+                             cv::Point(textX + textSize.width + 3, textY + baseline + 3),
+                             cv::Scalar(0, 0, 0), -1);  // Black background
+
+                // Draw text
+                cv::putText(overlay, textStr, cv::Point(textX, textY),
+                           cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+
+                annotationCount++;
+            }
+        }
+
+        std::cout << "    Annotated " << annotationCount << " sample points" << std::endl;
+
         cv::imwrite(overlayFile, overlay);
         std::cout << "  ✓ Overlay saved: " << overlayFile << std::endl;
 
